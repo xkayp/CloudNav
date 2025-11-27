@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Bot, Cpu, Key, Globe, Sparkles, Loader2, PauseCircle, Wrench, Bookmark, Copy, Box, Check } from 'lucide-react';
+import { X, Save, Bot, Key, Globe, Sparkles, PauseCircle, Wrench, Box, Copy, Check } from 'lucide-react';
 import { AIConfig, LinkItem } from '../types';
 import { generateLinkDescription } from '../services/geminiService';
 
@@ -27,9 +27,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   // Tools State
   const [password, setPassword] = useState('');
   const [domain, setDomain] = useState('');
-  const [showExtCode, setShowExtCode] = useState(false);
-  const [copiedManifest, setCopiedManifest] = useState(false);
-  const [copiedBackground, setCopiedBackground] = useState(false);
+  const [showExtCode, setShowExtCode] = useState(true);
+  
+  // Copy feedback states
+  const [copiedStates, setCopiedStates] = useState<{[key: string]: boolean}>({});
 
   useEffect(() => {
     if (isOpen) {
@@ -38,7 +39,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       setProgress({ current: 0, total: 0 });
       shouldStopRef.current = false;
       setDomain(window.location.origin);
-      // Try to recover password from localStorage for convenience, though strictly auth token is stored
       const storedToken = localStorage.getItem('cloudnav_auth_token');
       if (storedToken) setPassword(storedToken);
     }
@@ -71,25 +71,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     shouldStopRef.current = false;
     setProgress({ current: 0, total: missingLinks.length });
     
-    // Create a local copy to mutate
     let currentLinks = [...links];
 
-    // We process sequentially to avoid rate limits
     for (let i = 0; i < missingLinks.length; i++) {
         if (shouldStopRef.current) break;
 
         const link = missingLinks[i];
         try {
             const desc = await generateLinkDescription(link.title, link.url, localConfig);
-            
-            // Update the specific link in our local copy
             currentLinks = currentLinks.map(l => l.id === link.id ? { ...l, description: desc } : l);
-            
-            // Sync to parent every 1 item to show progress in UI
             onUpdateLinks(currentLinks);
-            
             setProgress({ current: i + 1, total: missingLinks.length });
-
         } catch (e) {
             console.error(`Failed to generate for ${link.title}`, e);
         }
@@ -103,79 +95,156 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       setIsProcessing(false);
   };
 
-  const handleCopy = (text: string, type: 'manifest' | 'background') => {
+  const handleCopy = (text: string, key: string) => {
       navigator.clipboard.writeText(text);
-      if (type === 'manifest') {
-          setCopiedManifest(true);
-          setTimeout(() => setCopiedManifest(false), 2000);
-      } else {
-          setCopiedBackground(true);
-          setTimeout(() => setCopiedBackground(false), 2000);
-      }
+      setCopiedStates(prev => ({ ...prev, [key]: true }));
+      setTimeout(() => {
+          setCopiedStates(prev => ({ ...prev, [key]: false }));
+      }, 2000);
   };
 
-  // 100% Reliability Bookmarklet Strategy: Window Open
-  const bookmarkletCode = `javascript:(function(){
-var u = window.location.href;
-var t = document.title;
-var target = '${domain}/?add_url='+encodeURIComponent(u)+'&add_title='+encodeURIComponent(t);
-window.open(target, '_blank');
-})();`.replace(/\s+/g, ' ');
+  // --- Chrome Extension Code Generators ---
 
-  // Updated Extension Codes with Notification
   const extManifest = `{
   "manifest_version": 3,
-  "name": "CloudNav 快捷保存",
-  "version": "2.1",
-  "permissions": ["activeTab", "notifications"],
-  "action": { "default_title": "保存到 CloudNav" },
-  "background": { "service_worker": "background.js" }
+  "name": "CloudNav Assistant",
+  "version": "3.0",
+  "permissions": ["activeTab"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Save to CloudNav"
+  }
 }`;
 
-  const extBackground = `const CONFIG = {
-  api: "${domain}/api/link",
+  const extPopupHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 320px; padding: 16px; font-family: -apple-system, sans-serif; background: #f8fafc; }
+    h3 { margin: 0 0 16px 0; font-size: 16px; color: #0f172a; }
+    label { display: block; font-size: 12px; color: #64748b; margin-bottom: 4px; }
+    input, select { width: 100%; margin-bottom: 12px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+    button { width: 100%; background: #3b82f6; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    #status { margin-top: 12px; text-align: center; font-size: 12px; min-height: 18px; }
+    .error { color: #ef4444; }
+    .success { color: #22c55e; }
+  </style>
+</head>
+<body>
+  <h3>Save to CloudNav</h3>
+  
+  <label>Title</label>
+  <input type="text" id="title" placeholder="Website Title">
+  
+  <label>Category</label>
+  <select id="category">
+    <option value="" disabled selected>Loading categories...</option>
+  </select>
+  
+  <button id="saveBtn">Save Bookmark</button>
+  <div id="status"></div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>`;
+
+  const extPopupJs = `const CONFIG = {
+  apiBase: "${domain}",
   password: "${password}"
 };
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.url) return;
+document.addEventListener('DOMContentLoaded', async () => {
+  const titleInput = document.getElementById('title');
+  const catSelect = document.getElementById('category');
+  const saveBtn = document.getElementById('saveBtn');
+  const statusDiv = document.getElementById('status');
   
-  chrome.action.setBadgeText({ text: "..." });
-  chrome.action.setBadgeBackgroundColor({ color: "#3b82f6" });
+  let currentTabUrl = '';
 
+  // 1. Get Current Tab Info
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab) {
+    titleInput.value = tab.title || '';
+    currentTabUrl = tab.url || '';
+  }
+
+  // 2. Fetch Categories from CloudNav
   try {
-    const res = await fetch(CONFIG.api, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-auth-password": CONFIG.password
-      },
-      body: JSON.stringify({ title: tab.title, url: tab.url })
+    const res = await fetch(\`\${CONFIG.apiBase}/api/storage\`, {
+      headers: { 'x-auth-password': CONFIG.password }
+    });
+    
+    if (!res.ok) throw new Error('Auth failed. Check password.');
+    
+    const data = await res.json();
+    
+    catSelect.innerHTML = '';
+    // Sort categories: Common first, then others
+    const sorted = data.categories.sort((a,b) => {
+        if(a.id === 'common') return -1;
+        if(b.id === 'common') return 1;
+        return 0;
     });
 
-    if (res.ok) {
-        const data = await res.json();
-        chrome.action.setBadgeText({ text: "OK" });
-        chrome.action.setBadgeBackgroundColor({ color: "#22c55e" });
-        
-        // Show notification
-        chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icon.png', // Fallback to puzzle icon if missing
-            title: '保存成功',
-            message: \`已保存到 [\${data.categoryName || '默认'}] 分类\`,
-            priority: 1
-        });
-    } else {
-        chrome.action.setBadgeText({ text: "ERR" });
-        chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
-    }
+    sorted.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      catSelect.appendChild(opt);
+    });
+
+    // Select 'common' by default if exists
+    catSelect.value = 'common';
+
   } catch (e) {
-    chrome.action.setBadgeText({ text: "NET" });
-    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
+    statusDiv.textContent = 'Error: ' + e.message;
+    statusDiv.className = 'error';
+    catSelect.innerHTML = '<option>Load failed</option>';
+    saveBtn.disabled = true;
   }
-  
-  setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
+
+  // 3. Save Handler
+  saveBtn.addEventListener('click', async () => {
+    const catId = catSelect.value;
+    const title = titleInput.value;
+    
+    if (!currentTabUrl) return;
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    statusDiv.textContent = '';
+
+    try {
+      const res = await fetch(\`\${CONFIG.apiBase}/api/link\`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-password': CONFIG.password
+        },
+        body: JSON.stringify({
+          title: title,
+          url: currentTabUrl,
+          categoryId: catId
+        })
+      });
+
+      if (res.ok) {
+        statusDiv.textContent = 'Saved successfully!';
+        statusDiv.className = 'success';
+        setTimeout(() => window.close(), 1200);
+      } else {
+        throw new Error(res.statusText);
+      }
+    } catch (e) {
+      statusDiv.textContent = 'Save failed: ' + e.message;
+      statusDiv.className = 'error';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Bookmark';
+    }
+  });
 });`;
 
   if (!isOpen) return null;
@@ -196,7 +265,7 @@ chrome.action.onClicked.addListener(async (tab) => {
                 onClick={() => setActiveTab('tools')}
                 className={`text-sm font-semibold flex items-center gap-2 pb-1 transition-colors ${activeTab === 'tools' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-500' : 'text-slate-500 dark:text-slate-400'}`}
               >
-                <Wrench size={18} /> 快捷工具
+                <Wrench size={18} /> 扩展工具
               </button>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
@@ -270,7 +339,7 @@ chrome.action.onClicked.addListener(async (tab) => {
 
                         <div>
                             <label className="block text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
-                                <Cpu size={12}/> 模型名称
+                                <Sparkles size={12}/> 模型名称
                             </label>
                             <input
                                 type="text"
@@ -328,7 +397,7 @@ chrome.action.onClicked.addListener(async (tab) => {
                 <div className="space-y-6">
                     <div className="space-y-3">
                         <label className="block text-xs font-medium text-slate-500 mb-1">
-                            第一步：输入您的访问密码 (用于生成扩展代码)
+                            第一步：输入您的访问密码 (用于生成代码)
                         </label>
                         <input
                             type="password"
@@ -339,72 +408,64 @@ chrome.action.onClicked.addListener(async (tab) => {
                         />
                     </div>
 
-                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-sm text-blue-800 dark:text-blue-200">
-                        <h4 className="font-bold flex items-center gap-2 mb-2"><Bookmark size={16}/> 方案A：小书签 (推荐更新)</h4>
-                        <p className="mb-3 text-xs opacity-80">
-                            <strong>全新升级版：</strong> 无惧网页拦截，100% 成功率。<br/>
-                            拖拽到书签栏后，点击它会弹出一个新窗口，让您手动确认分类并保存。
-                        </p>
-                        <div className="flex justify-center py-2 border-2 border-dashed border-blue-200 dark:border-blue-800/50 rounded-xl bg-white/50 dark:bg-black/20">
-                            <a 
-                                href={bookmarkletCode}
-                                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full shadow-lg cursor-move transition-transform hover:scale-105 active:scale-95 text-xs"
-                                title="拖拽我到书签栏"
-                                onClick={(e) => e.preventDefault()} 
-                            >
-                                <Save size={14} /> 保存到 CloudNav
-                            </a>
-                        </div>
-                    </div>
-
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
                         <h4 className="font-bold dark:text-white mb-2 text-sm flex items-center gap-2">
-                            <Box size={16} /> 方案B：Chrome 扩展
+                            <Box size={16} /> Chrome 扩展 (弹窗选择版)
                         </h4>
                         <p className="text-xs text-slate-500 mb-4">
-                            支持系统通知提示。请更新您的代码以获得最佳体验。
+                            在本地创建一个文件夹，创建以下 3 个文件，然后使用“加载已解压的扩展程序”安装。
+                            <br/>此扩展允许您点击图标后<strong>手动选择分类</strong>保存。
                         </p>
                         
-                        {!showExtCode ? (
-                            <button 
-                                onClick={() => setShowExtCode(true)}
-                                className="w-full py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded text-xs font-medium transition-colors"
-                            >
-                                显示扩展程序代码
-                            </button>
-                        ) : (
-                            <div className="space-y-4 animate-in fade-in zoom-in duration-300">
-                                <div>
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-xs font-mono font-bold text-slate-500">1. manifest.json</span>
-                                        <button 
-                                            onClick={() => handleCopy(extManifest, 'manifest')}
-                                            className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
-                                        >
-                                            {copiedManifest ? <Check size={12}/> : <Copy size={12}/>} 复制
-                                        </button>
-                                    </div>
-                                    <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
-                                        {extManifest}
-                                    </pre>
+                        <div className="space-y-4 animate-in fade-in zoom-in duration-300">
+                            {/* File 1: Manifest */}
+                            <div>
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-xs font-mono font-bold text-slate-500">1. manifest.json</span>
+                                    <button 
+                                        onClick={() => handleCopy(extManifest, 'manifest')}
+                                        className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
+                                    >
+                                        {copiedStates['manifest'] ? <Check size={12}/> : <Copy size={12}/>} 复制
+                                    </button>
                                 </div>
-                                
-                                <div>
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-xs font-mono font-bold text-slate-500">2. background.js</span>
-                                        <button 
-                                            onClick={() => handleCopy(extBackground, 'background')}
-                                            className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
-                                        >
-                                            {copiedBackground ? <Check size={12}/> : <Copy size={12}/>} 复制
-                                        </button>
-                                    </div>
-                                    <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
-                                        {extBackground}
-                                    </pre>
-                                </div>
+                                <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
+                                    {extManifest}
+                                </pre>
                             </div>
-                        )}
+
+                            {/* File 2: Popup HTML */}
+                            <div>
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-xs font-mono font-bold text-slate-500">2. popup.html</span>
+                                    <button 
+                                        onClick={() => handleCopy(extPopupHtml, 'popuphtml')}
+                                        className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
+                                    >
+                                        {copiedStates['popuphtml'] ? <Check size={12}/> : <Copy size={12}/>} 复制
+                                    </button>
+                                </div>
+                                <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
+                                    {extPopupHtml}
+                                </pre>
+                            </div>
+                            
+                            {/* File 3: Popup JS */}
+                            <div>
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-xs font-mono font-bold text-slate-500">3. popup.js</span>
+                                    <button 
+                                        onClick={() => handleCopy(extPopupJs, 'popupjs')}
+                                        className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
+                                    >
+                                        {copiedStates['popupjs'] ? <Check size={12}/> : <Copy size={12}/>} 复制
+                                    </button>
+                                </div>
+                                <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
+                                    {extPopupJs}
+                                </pre>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

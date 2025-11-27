@@ -6,7 +6,7 @@ interface Env {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
   'Access-Control-Allow-Headers': 'Content-Type, x-auth-password',
   'Access-Control-Max-Age': '86400',
 };
@@ -48,31 +48,46 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
         currentData = JSON.parse(currentDataStr);
     }
 
-    // 3. Find Best Category
-    // Logic: Look for 'Inbox', 'Unsorted', 'Common' or fall back to first available
-    let targetCatId = 'common';
-    let targetCatName = '常用推荐';
+    // 3. Determine Category
+    let targetCatId = '';
+    let targetCatName = '';
 
-    if (currentData.categories && currentData.categories.length > 0) {
-        // Try to find specific keywords
-        const keywords = ['收集', '未分类', 'inbox', 'temp', 'later'];
-        const match = currentData.categories.find((c: any) => 
-            keywords.some(k => c.name.toLowerCase().includes(k))
-        );
+    // 3a. Check for explicit categoryId from request
+    if (newLinkData.categoryId) {
+        const explicitCat = currentData.categories.find((c: any) => c.id === newLinkData.categoryId);
+        if (explicitCat) {
+            targetCatId = explicitCat.id;
+            targetCatName = explicitCat.name;
+        }
+    }
 
-        if (match) {
-            targetCatId = match.id;
-            targetCatName = match.name;
-        } else {
-            // Fallback to 'common' if exists, else first category
-            const common = currentData.categories.find((c: any) => c.id === 'common');
-            if (common) {
-                targetCatId = 'common';
-                targetCatName = common.name;
+    // 3b. Fallback: Auto-detect if no explicit category or explicit one not found
+    if (!targetCatId) {
+        if (currentData.categories && currentData.categories.length > 0) {
+            // Try to find specific keywords
+            const keywords = ['收集', '未分类', 'inbox', 'temp', 'later'];
+            const match = currentData.categories.find((c: any) => 
+                keywords.some(k => c.name.toLowerCase().includes(k))
+            );
+
+            if (match) {
+                targetCatId = match.id;
+                targetCatName = match.name;
             } else {
-                targetCatId = currentData.categories[0].id;
-                targetCatName = currentData.categories[0].name;
+                // Fallback to 'common' if exists, else first category
+                const common = currentData.categories.find((c: any) => c.id === 'common');
+                if (common) {
+                    targetCatId = 'common';
+                    targetCatName = common.name;
+                } else {
+                    targetCatId = currentData.categories[0].id;
+                    targetCatName = currentData.categories[0].name;
+                }
             }
+        } else {
+            // No categories exist at all
+            targetCatId = 'common';
+            targetCatName = '默认';
         }
     }
 

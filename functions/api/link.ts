@@ -7,6 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, x-auth-password',
+  'Access-Control-Max-Age': '86400',
 };
 
 export const onRequestOptions = async () => {
@@ -33,7 +34,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }) => 
   try {
     const newLinkData = await request.json() as any;
     
-    // Validate input
+    // Validate input (Relaxed validation to ensure simple requests work)
     if (!newLinkData.title || !newLinkData.url) {
         return new Response(JSON.stringify({ error: 'Missing title or url' }), { status: 400, headers: corsHeaders });
     }

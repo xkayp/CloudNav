@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Bot, Cpu, Key, Globe, Sparkles, Loader2, PauseCircle, Wrench, Bookmark, Copy } from 'lucide-react';
+import { X, Save, Bot, Cpu, Key, Globe, Sparkles, Loader2, PauseCircle, Wrench, Bookmark, Copy, Box, Check } from 'lucide-react';
 import { AIConfig, LinkItem } from '../types';
 import { generateLinkDescription } from '../services/geminiService';
 
@@ -26,6 +26,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   // Tools State
   const [password, setPassword] = useState('');
   const [domain, setDomain] = useState('');
+  const [showExtCode, setShowExtCode] = useState(false);
+  const [copiedManifest, setCopiedManifest] = useState(false);
+  const [copiedBackground, setCopiedBackground] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -99,30 +102,94 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       setIsProcessing(false);
   };
 
-  // Generate Bookmarklet Code
-  const bookmarkletCode = `javascript:(function(){
-    var p = prompt('保存到 CloudNav:\\n请输入标题 (留空则使用网页标题)', document.title);
-    if (p === null) return;
-    var t = p || document.title;
-    var u = window.location.href;
-    var api = '${domain}/api/link';
-    var pwd = '${password}';
-    if(!pwd){ alert('请先在 CloudNav 生成包含密码的小书签！'); return; }
-    fetch(api, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'x-auth-password': pwd},
-        body: JSON.stringify({title: t, url: u})
-    }).then(r=>{
-        if(r.ok) alert('✅ 已保存到 CloudNav');
+  const handleCopy = (text: string, type: 'manifest' | 'background') => {
+      navigator.clipboard.writeText(text);
+      if (type === 'manifest') {
+          setCopiedManifest(true);
+          setTimeout(() => setCopiedManifest(false), 2000);
+      } else {
+          setCopiedBackground(true);
+          setTimeout(() => setCopiedBackground(false), 2000);
+      }
+  };
+
+  // Improved Bookmarklet Code with Async/Await and Error Handling
+  const bookmarkletCode = `javascript:(async function(){
+    try {
+        var p = prompt('保存到 CloudNav:\\n请输入标题 (留空则使用网页标题)', document.title);
+        if (p === null) return;
+        var t = p || document.title;
+        var u = window.location.href;
+        var api = '${domain}/api/link';
+        var pwd = '${password}';
+        if(!pwd) throw new Error('未配置密码，请先在 CloudNav 生成包含密码的小书签');
+        
+        var r = await fetch(api, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'x-auth-password': pwd},
+            body: JSON.stringify({title: t, url: u})
+        });
+        
+        if(r.ok) alert('✅ 保存成功');
         else alert('❌ 保存失败: ' + r.status);
-    }).catch(e=>alert('❌ 网络错误: ' + e));
+    } catch(e) {
+        alert('❌ 错误: ' + e.message + '\\n(如果是CSP安全限制，请使用 Chrome 插件)');
+    }
 })();`.replace(/\s+/g, ' ');
+
+  // Chrome Extension Codes
+  const extManifest = `{
+  "manifest_version": 3,
+  "name": "CloudNav 快捷保存",
+  "version": "1.0",
+  "permissions": ["activeTab"],
+  "action": { "default_title": "保存到 CloudNav" },
+  "background": { "service_worker": "background.js" }
+}`;
+
+  const extBackground = `const CONFIG = {
+  api: "${domain}/api/link",
+  password: "${password}"
+};
+
+chrome.action.onClicked.addListener(async (tab) => {
+  if (!tab.url) return;
+  
+  // 显示 "..." 状态
+  chrome.action.setBadgeText({ text: "..." });
+  chrome.action.setBadgeBackgroundColor({ color: "#3b82f6" });
+
+  try {
+    const res = await fetch(CONFIG.api, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-auth-password": CONFIG.password
+      },
+      body: JSON.stringify({ title: tab.title, url: tab.url })
+    });
+
+    if (res.ok) {
+        chrome.action.setBadgeText({ text: "OK" });
+        chrome.action.setBadgeBackgroundColor({ color: "#22c55e" });
+    } else {
+        chrome.action.setBadgeText({ text: "ERR" });
+        chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
+    }
+  } catch (e) {
+    chrome.action.setBadgeText({ text: "NET" });
+    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
+  }
+  
+  // 3秒后清除状态
+  setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
+});`;
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 flex flex-col max-h-[90vh]">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-700 flex flex-col max-h-[90vh]">
         
         <div className="flex justify-between items-center p-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
           <div className="flex gap-4">
@@ -266,11 +333,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {activeTab === 'tools' && (
                 <div className="space-y-6">
-                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-sm text-blue-800 dark:text-blue-200">
-                        <h4 className="font-bold flex items-center gap-2 mb-2"><Bookmark size={16}/> 浏览器小书签 (Bookmarklet)</h4>
-                        <p className="mb-2">将下方的按钮拖拽到浏览器的书签栏。以后在任何网页点击该书签，即可将当前页面保存到 CloudNav。</p>
-                    </div>
-
                     <div className="space-y-3">
                         <label className="block text-xs font-medium text-slate-500 mb-1">
                             第一步：输入您的访问密码 (用于生成代码)
@@ -279,41 +341,81 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono tracking-widest"
                             placeholder="部署时设置的 PASSWORD"
                         />
-                        <p className="text-[10px] text-slate-400">密码仅用于生成下方的脚本，不会上传。</p>
                     </div>
 
-                    <div className="flex justify-center py-4 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl">
-                        {password ? (
-                            <a 
-                                href={bookmarkletCode}
-                                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full shadow-lg cursor-move transition-transform hover:scale-105 active:scale-95"
-                                title="拖拽我到书签栏"
-                                onClick={(e) => e.preventDefault()} // Prevent clicking
-                            >
-                                <Save size={16} /> 保存到 CloudNav
-                            </a>
-                        ) : (
-                            <span className="text-slate-400 text-sm">请输入密码以生成按钮</span>
-                        )}
-                    </div>
-                    
-                    <div className="text-center text-xs text-slate-400">
-                         👆 请将上方蓝色按钮直接拖拽到浏览器顶部的书签栏
-                    </div>
-
-                    <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                        <h4 className="font-medium dark:text-white mb-2 text-sm">高级：Chrome 扩展程序开发</h4>
-                        <p className="text-xs text-slate-500 mb-2">
-                            如果您想开发原生 Chrome 扩展，可以调用以下 API 接口：
-                        </p>
-                        <div className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-xs font-mono text-slate-600 dark:text-slate-300 break-all select-all">
-                            POST {domain}/api/link<br/>
-                            Headers: &#123; "x-auth-password": "YOUR_PASSWORD" &#125;<br/>
-                            Body: &#123; "title": "...", "url": "..." &#125;
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-sm text-blue-800 dark:text-blue-200">
+                        <h4 className="font-bold flex items-center gap-2 mb-2"><Bookmark size={16}/> 方案A：浏览器小书签 (Bookmarklet)</h4>
+                        <p className="mb-3 text-xs opacity-80">最简单，无需安装。将下方的按钮拖拽到浏览器的书签栏。以后在网页点击该书签即可保存。</p>
+                        <div className="flex justify-center py-2 border-2 border-dashed border-blue-200 dark:border-blue-800/50 rounded-xl bg-white/50 dark:bg-black/20">
+                            {password ? (
+                                <a 
+                                    href={bookmarkletCode}
+                                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full shadow-lg cursor-move transition-transform hover:scale-105 active:scale-95 text-xs"
+                                    title="拖拽我到书签栏"
+                                    onClick={(e) => e.preventDefault()} 
+                                >
+                                    <Save size={14} /> 保存到 CloudNav
+                                </a>
+                            ) : (
+                                <span className="text-slate-400 text-xs">请输入密码生成按钮</span>
+                            )}
                         </div>
+                        <div className="text-center text-[10px] text-slate-500 mt-2">
+                             (注: 部分网站(如GitHub)因安全策略限制可能无法使用小书签，请使用方案B)
+                        </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                        <h4 className="font-bold dark:text-white mb-2 text-sm flex items-center gap-2">
+                            <Box size={16} /> 方案B：Chrome 扩展 (推荐)
+                        </h4>
+                        <p className="text-xs text-slate-500 mb-4">
+                            支持所有网站。在电脑上新建一个文件夹，创建以下两个文件，然后在 Chrome 扩展程序页面 "加载已解压的扩展程序" 即可。
+                        </p>
+                        
+                        {!showExtCode ? (
+                            <button 
+                                onClick={() => setShowExtCode(true)}
+                                className="w-full py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded text-xs font-medium transition-colors"
+                            >
+                                显示扩展程序代码
+                            </button>
+                        ) : (
+                            <div className="space-y-4 animate-in fade-in zoom-in duration-300">
+                                <div>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-xs font-mono font-bold text-slate-500">1. manifest.json</span>
+                                        <button 
+                                            onClick={() => handleCopy(extManifest, 'manifest')}
+                                            className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
+                                        >
+                                            {copiedManifest ? <Check size={12}/> : <Copy size={12}/>} 复制
+                                        </button>
+                                    </div>
+                                    <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
+                                        {extManifest}
+                                    </pre>
+                                </div>
+                                
+                                <div>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-xs font-mono font-bold text-slate-500">2. background.js</span>
+                                        <button 
+                                            onClick={() => handleCopy(extBackground, 'background')}
+                                            className="text-[10px] flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-blue-100 text-slate-600 dark:text-slate-300"
+                                        >
+                                            {copiedBackground ? <Check size={12}/> : <Copy size={12}/>} 复制
+                                        </button>
+                                    </div>
+                                    <pre className="bg-slate-100 dark:bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-600 dark:text-slate-300 overflow-x-auto border border-slate-200 dark:border-slate-700">
+                                        {extBackground}
+                                    </pre>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

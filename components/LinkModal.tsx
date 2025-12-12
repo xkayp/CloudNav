@@ -60,8 +60,12 @@ const LinkModal: React.FC<LinkModalProps> = ({ isOpen, onClose, onSave, categori
         if (!targetUrl.startsWith('http')) {
             normalizedUrl = 'https://' + targetUrl;
         }
-        const domain = new URL(normalizedUrl).hostname;
-        const newIcon = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+        
+        // Use Google's specialized favicon service which is more robust
+        // t2.gstatic.com is used by Chrome internal pages
+        // fallback_opts=TYPE,SIZE,URL ensures it tries multiple ways to get an icon
+        const newIcon = `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent(normalizedUrl)}&size=128`;
+        
         setIconUrl(newIcon);
       } catch (e) {
           // invalid url

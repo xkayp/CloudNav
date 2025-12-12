@@ -13,6 +13,30 @@ interface CategoryManagerModalProps {
   onDeleteCategory: (id: string) => void;
 }
 
+// 预定义常用图标列表
+const COMMON_ICONS = [
+  { value: 'Folder', label: '文件夹' },
+  { value: 'Star', label: '收藏/星标' },
+  { value: 'Code', label: '开发/代码' },
+  { value: 'Palette', label: '设计/调色板' },
+  { value: 'BookOpen', label: '阅读/书籍' },
+  { value: 'Gamepad2', label: '游戏/娱乐' },
+  { value: 'Bot', label: '人工智能/机器人' },
+  { value: 'ShoppingBag', label: '购物/商店' },
+  { value: 'Globe', label: '全球/网络' },
+  { value: 'Server', label: '服务器/运维' },
+  { value: 'Terminal', label: '终端/系统' },
+  { value: 'Cpu', label: '硬件/芯片' },
+  { value: 'Music', label: '音乐' },
+  { value: 'Video', label: '视频' },
+  { value: 'Image', label: '图片' },
+  { value: 'Mail', label: '邮箱' },
+  { value: 'MessageCircle', label: '社交/聊天' },
+  { value: 'Briefcase', label: '办公/工作' },
+  { value: 'Cloud', label: '云服务' },
+  { value: 'Shield', label: '安全' },
+];
+
 const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({ 
   isOpen, 
   onClose, 
@@ -140,15 +164,21 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
                     {editingId === cat.id ? (
                       <div className="flex flex-col gap-2">
                           <div className="flex gap-2">
-                              <div className="relative w-12 shrink-0">
-                                <input
-                                    type="text"
+                              <div className="relative w-32 shrink-0">
+                                <select
                                     value={editIcon}
                                     onChange={(e) => setEditIcon(e.target.value)}
-                                    className="w-full p-1.5 text-center text-sm rounded border border-blue-500 dark:bg-slate-800 dark:text-white outline-none"
-                                    placeholder="Icon"
-                                    title="Lucide图标名 或 Emoji"
-                                />
+                                    className="w-full p-1.5 text-sm rounded border border-blue-500 dark:bg-slate-800 dark:text-white outline-none appearance-none"
+                                >
+                                    {COMMON_ICONS.map(icon => (
+                                        <option key={icon.value} value={icon.value}>
+                                            {icon.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                                    <Icon name={editIcon} size={14} />
+                                </div>
                               </div>
                               <input 
                                 type="text" 
@@ -234,14 +264,23 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
            <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">添加新分类</label>
            <div className="flex flex-col gap-2">
              <div className="flex gap-2">
-                 <input 
-                    type="text"
-                    value={newCatIcon}
-                    onChange={(e) => setNewCatIcon(e.target.value)}
-                    placeholder="Icon"
-                    className="w-16 p-2 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white text-sm text-center outline-none"
-                    title="图标名称或Emoji"
-                 />
+                 <div className="relative w-32 shrink-0">
+                    <select
+                        value={newCatIcon}
+                        onChange={(e) => setNewCatIcon(e.target.value)}
+                        className="w-full p-2 pl-2 pr-8 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white text-sm outline-none appearance-none"
+                    >
+                        {COMMON_ICONS.map(icon => (
+                            <option key={icon.value} value={icon.value}>
+                                {icon.label}
+                            </option>
+                        ))}
+                    </select>
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                        <Icon name={newCatIcon} size={16} />
+                    </div>
+                 </div>
+                 
                  <input 
                     type="text"
                     value={newCatName}

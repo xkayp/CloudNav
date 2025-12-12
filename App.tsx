@@ -459,7 +459,8 @@ function App() {
             href={link.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="group relative flex flex-col p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700/50 shadow-sm hover:shadow-lg hover:border-blue-200 dark:hover:border-slate-600 hover:-translate-y-0.5 transition-all duration-200 hover:bg-blue-50 dark:hover:bg-slate-750"
+            // ADDED: Conditional z-index to handle dropdown overlap
+            className={`group relative flex flex-col p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700/50 shadow-sm hover:shadow-lg hover:border-blue-200 dark:hover:border-slate-600 hover:-translate-y-0.5 transition-all duration-200 hover:bg-blue-50 dark:hover:bg-slate-750 ${isMenuOpen ? 'z-50' : 'z-0'}`}
             title={link.description || link.url}
         >
             <div className="flex items-center gap-3 mb-1.5 pr-6">
@@ -489,7 +490,7 @@ function App() {
                 
                 {isMenuOpen && (
                     <div 
-                        className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-100 dark:border-slate-600 z-20 py-1 flex flex-col animate-in fade-in zoom-in duration-200 origin-top-right"
+                        className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-100 dark:border-slate-600 z-50 py-1 flex flex-col animate-in fade-in zoom-in duration-200 origin-top-right"
                         onClick={(e) => {
                             e.preventDefault(); 
                             e.stopPropagation();
